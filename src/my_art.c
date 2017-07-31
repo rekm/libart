@@ -40,7 +40,7 @@
  * on the null pointer.  I dont know if this was safe, but i didn't like it. 
  * 
  * @return:  0 , in case of memory allocation error
- *          -1 , if memory allocation fails  */
+ *           1 , if memory allocation fails  */
 
 static int alloc_node(uint8_t type,art_node *node) {
     switch (type) { 
@@ -64,7 +64,7 @@ static int alloc_node(uint8_t type,art_node *node) {
         return 0;
     }
     else
-        return -1; 
+        return 1; 
 }
 
 int art_tree_init(art_tree *t) {
@@ -244,7 +244,230 @@ static art_node** find_child(art_node *node, unsigned char c) {
     return NULL;
 }
           
-            
+// min
+static inline int min(int a, int b) {
+    return (a <b) ? a : b;
+}
+
+/**
+ * Returns the number of prefix matches between a key and a node
+ */
+static int check_prefix(const art_node *node, const unsigned char *key,
+                        int key_len, int depth) {
+    int max_cmp = min( 
+            min(node->partial_len, MAX_PREFIX_LEN),
+            key_len - depth);
+    int i;
+    for (i=0; i < max_cmp; i++) {
+       if (node->partial[i] != key[depth+i])
+          return i;
+    }
+    return i;
+}
+
+/** Checks if leaf matches
+ * @return  0 on success
+ */
+static int leaf_matches(const art_leaf *leaf, const unsigned char *key,
+                        int key_len){
+    // Fail if key length are diffrent
+    if (leaf->key_len != (uint32_t)key_len) return 1;
+
+    //Compare the keys
+    return memcmp(leaf->key, key, key_len);
+}
+
+/**
+ * Searches for a value in the ART tree
+ * @arg t The tree
+ * @arg key 
+ * @arg key_len
+ * @return NULL if item wasn't found, otherwise return
+ *         value pointer
+ */
+void *art_search(const art_tree *t, const unsigned char *key, int key_len){
+    art_node **children;
+    art_node *node = t->root;
+    int prefix_len, depth = 0;
+    while (node) {
+        //Check if leaf
+        if (IS_LEAF(node)) {
+            node = (art_node*)LEAF_RAW(node);
+            // Check if the expanded path matches
+            if (!leaf_matches((art_leaf*)node, key, key_len))
+                return ((art_leaf*)node)->value;
+            return NULL;
+        }
+
+        // Bail if prefix doesn't match 
+        if (node->partial_len) {
+            prefix_len = check_prefix(node, key, key_len, depth);
+            if (prefix_len != min(MAX_PREFIX_LEN, node->partial_len))
+                return NULL;
+            depth = depth + node->partial_len;
+        }
+
+        //Recursive search
+        children = find_child(node, key[depth]);
+        node = (children) ? *children : NULL;
+        depth++;
+    }
+    return NULL;
+}
+
+// Get minimum leaf under node
+static art_leaf* minimum(const art_node *node) {
+    // Base cases
+    if (!node) return NULL;
+    if (IS_LEAF(node)) return LEAF_RAW(node);
+                    
+    int i;
+    switch (node->type) {
+        case NODE4:
+            return minimum(((const art_node4*)node)->children[0]);
+        case NODE16:
+            return minimum(((const art_node16*)node)->children[0]);
+        case NODE48:
+            i=0;
+            while (!((const art_node48*)node)->keys[i]) i++;
+            i = ((const art_node48*)node)->keys[i] -1; 
+            return minimum(((const art_node48*)node)->children[i]);
+        case NODE256:
+            i=0;
+            while (!((const art_node256*)node)->children[i]) i++;
+            return minimum(((const art_node256*)node)->children[i]);
+        default:
+            abort();
+    }
+    return NULL;
+}
+
+// Get maximum leaf under node
+static art_leaf* maximum(const art_node *node) {
+    // Base cases
+    if (!node) return NULL;
+    if (IS_LEAF(node)) return LEAF_RAW(node);
+
+    int i;
+    switch (node->type) {
+        case NODE4:
+            return maximum(
+                    ((const art_node4*)node)->children[node->num_children-1]);
+        case NODE16:
+            return maximum(
+                    ((const art_node16*)node)->children[node->num_children-1]);
+        case NODE48:
+            i=255;
+            while (!((const art_node48*)node)->keys[i]) i--;
+            i = ((const art_node48*)node)->keys[i]-1;
+            return maximum(((const art_node48*)node)->children[i]);
+        case NODE256:
+            i=255;
+            while (!((const art_node256*)node)->children[i]) i--;
+            return maximum(((const art_node256*)node)->children[i]);
+        default:
+            abort();
+    }
+    return NULL;
+}
+
+/*
+ * Returns the minimum valued leaf
+ */
+art_leaf *art_minimum(art_tree *t) {
+    return minimum((art_node*)t->root);
+}
+
+/**
+ * Returns the maximum valued leaf
+ */
+art_leaf *art_maximum(art_tree *t) {
+    return maximum((art_node*)t->root);
+}
+
+/**
+ * Changed from original project
+ * I use a pass through reference for the created leaf.
+ * @arg nleaf reference to leaf to be filled
+ * @arg *key
+ * @arg key_len
+ * @arg *value
+ * @returns 0 if creation succeeded
+ *         -1 if it failed
+ */
+static int make_leaf(art_leaf *nleaf, const unsigned char *key,
+                     int key_len, void *value) {
+    nleaf = (art_leaf*)calloc(1, sizeof(art_leaf)+key_len);
+    if(nleaf){
+        nleaf->value = value;
+        nleaf->key_len = key_len;
+        memcpy(nleaf->key,key,key_len);
+        return 0;
+    }
+    return -1;
+}
+
+/**
+ * Takes two leafs and a depth as input and calculates the longest common
+ * prefix;
+ */
+static int longest_common_prefix(art_leaf *l1, art_leaf *l2, int depth) {
+    int max_cmp = min(l1->key_len, l2->key_len) - depth;
+    int i;
+    for (i=0; i < max_cmp; i++) {
+        if (l1->key[depth+i] != l2->key[depth+i])
+            return i;
+    }
+    return i;
+}
+
+static void copy_header(art_node *dest, art_node *src) {
+    dest->num_children = src->num_children;
+    dest->partial_len = src->partial_len;
+    memcpy(dest->partial, src->partial, min(MAX_PREFIX_LEN, src->partial_len));
+}
+
+// Adding Children
+
+
+static void add_child256(art_node256 *node, unsigned char c, void *child) {
+    node->n.num_children++;
+    node->children[c] = (art_node*)child;
+}
+
+/**
+ * Adds a Node48 as a child and 
+ *
+ * @return: 0 if success 
+ *          1 otherwise
+ */
+static int add_child48(art_node48 *node, art_node **ref, unsigned char c,
+                        void *child) {
+    int ret;
+    if (node->n.num_children < 48) {
+        int pos = 0;
+        while (node->children[pos]) pos++;
+        node->children[pos] = (art_node*)child;
+        node->keys[c] = pos + 1;
+        node->n.num_children++;
+    } else {
+        /*I wanted a way to better detect allocation issues and
+         * now this happend. This looks really ugly.
+         * The allocated memory lives under a new pointer and
+         * should be freed all the same, when the time comes.
+         * In before this causes the biggest memory leak of all time */
+        art_node256 *new_node;
+        art_node *temp_node = NULL;
+        ret = alloc_node(NODE256,temp_node);
+        if(ret)
+            return 1;
+        new_node = (art_node256*)temp_node;
+        zfree(&node);
+        add_child256(new_node, c, child);
+    }
+    return 0;
+}
+
 
 
 
