@@ -393,7 +393,7 @@ art_leaf *art_maximum(art_tree *t) {
  * @arg key_len
  * @arg *value
  * @returns 0 if creation succeeded
- *         -1 if it failed
+ *          1 if it failed
  */
 static int make_leaf(art_leaf *nleaf, const unsigned char *key,
                      int key_len, void *value) {
@@ -404,7 +404,7 @@ static int make_leaf(art_leaf *nleaf, const unsigned char *key,
         memcpy(nleaf->key,key,key_len);
         return 0;
     }
-    return -1;
+    return 1;
 }
 
 /**
@@ -430,9 +430,10 @@ static void copy_header(art_node *dest, art_node *src) {
 // Adding Children
 
 
-static void add_child256(art_node256 *node, unsigned char c, void *child) {
+static int add_child256(art_node256 *node, unsigned char c, void *child) {
     node->n.num_children++;
     node->children[c] = (art_node*)child;
+    return 0;
 }
 
 /**
@@ -443,7 +444,7 @@ static void add_child256(art_node256 *node, unsigned char c, void *child) {
  */
 static int add_child48(art_node48 *node, art_node **ref, unsigned char c,
                         void *child) {
-    int ret;
+    int ret = 0;
     if (node->n.num_children < 48) {
         int pos = 0;
         while (node->children[pos]) pos++;
@@ -459,15 +460,218 @@ static int add_child48(art_node48 *node, art_node **ref, unsigned char c,
         art_node256 *new_node;
         art_node *temp_node = NULL;
         ret = alloc_node(NODE256,temp_node);
-        if(ret)
-            return 1;
-        new_node = (art_node256*)temp_node;
-        zfree(&node);
-        add_child256(new_node, c, child);
+        if(ret){
+            zfree(&temp_node);
+            goto endfun;
+        } else {            
+            new_node = (art_node256*)temp_node;
+            zfree(&node);
+            add_child256(new_node, c, child);
+        }
     }
-    return 0;
+endfun:
+    return ret;
 }
 
+static int add_child16(art_node16 *node, art_node **ref,
+                       unsigned char c, void *child) {
+    int ret = 0;
+    if (node->n.num_children < 16) {
+        unsigned mask = (1 << node->n.num_children) - 1; 
+        
+        // non x86 architectures 
+        #ifdef __i386__
+            __m128i cmp;
 
+            // Compare the key to all 16 stored keys
+            cmp = _mm_cmplt_epi8( _mm_set1_epi8(c), 
+                    _mm_loadu_si128((__m128i*)node->keys));
 
+            //Use mask to ignore children that don't exist
+            unsigned bitfield = _mm_movemask_epi8(cmp) & mask;
+        #else
+        #ifdef __amd64__
+            __m128i cmp;
 
+            //compare the key to all 16 stored keys
+            cmp = _mm_cmplt_epi8( _mm_set1_epi8(c),
+                    _mm_loadu_si128((__m128i*)node->keys));
+
+            // Use mask to ignore children that don't exist
+            unsigned bitfield = _mm_movemask_epi8(cmp) & mask;
+        #else
+            // architecture not supported, doing it the labourious way
+            unsigned bitfield = 0;
+            for (short i = 0; i < 16; i++) {
+                if (c < node->keys[i])
+                    bitfield |= (1 << i);
+            }
+
+            // Use a mask to ignore children that don't exist
+            unsigned bitfield &= mask;
+        #endif
+        #endif
+
+        // Check if less than any
+        unsigned i;
+        if (bitfield) {
+             i = __builtin_ctz(bitfield);
+             memmove(node->keys+i+1, node->keys+i,
+                     node->n.num_children-i);
+             memmove(node->children+i+1, node->children+i,
+                     (node->n.num_children-i)*sizeof(void*));
+        } else
+             i = node->n.num_children;
+        // Setting child
+        node->keys[i] = c;
+        node->children[i] = (art_node*)child;
+        node->n.num_children++;
+    } else {
+        art_node48 *new_node;
+        art_node *tmp_node = NULL;
+        ret = alloc_node(NODE48,tmp_node);
+        if(ret){
+            zfree(&tmp_node);
+            goto endfun;
+
+        } else {
+            new_node = (art_node48*)tmp_node;
+            memcpy(new_node->children, node->children,
+                   sizeof(void*)*node->n.num_children);
+            for (int ii=0; ii<node->n.num_children; ii++) {
+                new_node->keys[node->keys[ii]] = ii + 1;
+            }
+            copy_header((art_node*)new_node, (art_node*)node);
+            *ref = (art_node*)new_node;
+            zfree(&node);
+            add_child48(new_node, ref, c, child);
+        }
+    }
+endfun: 
+    return ret;
+}
+
+static int add_child4(art_node4 *node, art_node **ref,
+                       unsigned char c, void *child) {
+    int ret = 0;
+    if (node->n.num_children < 4 ) {
+        int i;
+        for (i=0; i < node->n.num_children; i++) {
+            if (c < node->keys[i]) break;
+        }
+
+        // Shift to make room
+        memmove(node->keys+i+1, node->keys+i, node->n.num_children - i);
+        memmove(node->children+i+1, node->children+i,
+                (node->n.num_children - i)*sizeof(void*));
+        // Insert element 
+        node->keys[i] = c;
+        node->children[i] = (art_node*)child;
+        node->n.num_children++;
+        
+    } else { 
+        art_node16 *new_node;
+        art_node *tmp_node = NULL;
+        ret = alloc_node(NODE16, tmp_node);
+        
+        if(ret) {
+            zfree(&tmp_node);
+            goto endfun;
+        } else {
+            new_node = (art_node16*)tmp_node;
+            memcpy(new_node->children, node->children,
+                   sizeof(void*)*node->n.num_children);
+            memcpy(new_node->keys, node->keys,
+                   sizeof(unsigned char)*node->n.num_children);
+            copy_header((art_node*)new_node, (art_node*)node);
+            *ref = (art_node*)new_node;
+            zfree(&node);
+            add_child16(new_node, ref, c, child);
+        }
+    }
+endfun:
+    return ret;
+}
+
+/**
+ * Wrapper function for addition of child nodes
+ *
+ * @return 0 if success and 1 if addition failed
+ */
+static int add_child(art_node *node, art_node **ref,
+                     unsigned char c, void *child) {
+    switch (node->type) {
+        case NODE4: 
+            return add_child4((art_node4*)node, ref, c, child);
+        case NODE16:
+            return add_child16((art_node16*)node, ref, c, child);
+        case NODE48:
+            return add_child48((art_node48*)node, ref, c, child);
+        case NODE256:
+            return add_child256((art_node256*)node, c, child);
+        default:
+            abort();
+    }
+    return 1;
+}
+
+/**
+ * Calculates the index at which the prefixes mismatch
+ */
+static int prefix_mismatch(const art_node *node, const unsigned char *key,
+                           int key_len, int depth) {
+    int max_cmp = min(
+                      min(MAX_PREFIX_LEN, node->partial_len),
+                      key_len - depth);
+    int i;
+    for (i=0; i < max_cmp; i++) {
+        if (node->partial[i] != key[depth+i])
+            return i;
+    }
+
+    // If the prefix is short we can avoid finding a leaf
+    if (node->partial_len > MAX_PREFIX_LEN) {
+        // Prefix is longer than what we've checked, find leaf
+        art_leaf *leaf = minimum(node);
+        max_cmp = min(leaf->key_len, key_len) - depth;
+        for (; i < max_cmp; i++) {
+            if (leaf->key[i+depth] != key[depth+i])
+                return i;
+        }
+    }
+    return i;
+}
+
+#define MEMORY_ALLOCATION_ERROR 1
+#define NOMINAL 0
+#define VALUE_ALLREADY_EXISTS_ERROR -1
+
+static int recursive_insert(art_node *node, art_node **ref,
+                            const unsigned char *key, int key_len,
+                            void *value, int depth, int *old) {
+    int ret = NOMINAL;
+    if (!node) {
+        art_leaf *tmp_leaf = NULL;
+        
+        ret = make_leaf( tmp_leaf, key, key_len, value );
+        if (ret == MEMORY_ALLOCATION_ERROR){
+            zfree(&tmp_leaf);
+            goto endfun;
+        }
+        *ref = (art_node*)SET_LEAF(tmp_leaf);
+        goto endfun;
+    }
+
+    // If we are a leaf, we need to update an existing value
+    if (IS_LEAF(node)) { 
+        art_leaf *leaf = LEAF_RAW(node);
+
+        // Check if we are updating an existing value 
+        if(!leaf_matches(leaf, key, key_len)) {
+            *old = 1;
+        }
+    }
+
+endfun:
+    return ret;
+}
