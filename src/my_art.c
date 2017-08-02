@@ -22,18 +22,21 @@
 #endif
 
 
-/** We are manipulating pointertags to store information in accordance with
- *  the paper first decribing the datastructure and the authors c++ 
- *  implementation.
+/* 
+ * We are manipulating pointertags to store information in accordance with
+ * the paper first decribing the datastructure and the authors c++ 
+ * implementation.
  *  
- *  Here are some makros that help with that pointer maintanance*/
+ *  Here are some makros that help with that pointer maintanance
+ */
 
 #define IS_LEAF(x) (((uintptr_t)x & 1))
 #define SET_LEAF(x) ((void*)((uintptr_t)x | 1))
 #define LEAF_RAW(x) ((art_leaf*)((void*)((uintptr_t)x & ~1)))
 
 /**
- * using libarts compact way to allocate memory for all the the tree nodes.
+ * allocate memory for all the the tree node types.
+ *
  * It uses the type and initializes the corresponding node struct to 0
  * Rewrote it slightly to use a passthrough node reference instead of
  * possibly casting Null to an art_node and then setting the type attribute
@@ -463,11 +466,10 @@ static int add_child48(art_node48 *node, art_node **ref, unsigned char c,
         if(ret){
             zfree(&temp_node);
             goto endfun;
-        } else {            
-            new_node = (art_node256*)temp_node;
-            zfree(&node);
-            add_child256(new_node, c, child);
-        }
+        }            
+        new_node = (art_node256*)temp_node;
+        zfree(&node);
+        add_child256(new_node, c, child);
     }
 endfun:
     return ret;
@@ -534,18 +536,17 @@ static int add_child16(art_node16 *node, art_node **ref,
             zfree(&tmp_node);
             goto endfun;
 
-        } else {
-            new_node = (art_node48*)tmp_node;
-            memcpy(new_node->children, node->children,
-                   sizeof(void*)*node->n.num_children);
-            for (int ii=0; ii<node->n.num_children; ii++) {
-                new_node->keys[node->keys[ii]] = ii + 1;
-            }
-            copy_header((art_node*)new_node, (art_node*)node);
-            *ref = (art_node*)new_node;
-            zfree(&node);
-            add_child48(new_node, ref, c, child);
+        } 
+        new_node = (art_node48*)tmp_node;
+        memcpy(new_node->children, node->children,
+               sizeof(void*)*node->n.num_children);
+        for (int ii=0; ii<node->n.num_children; ii++) {
+            new_node->keys[node->keys[ii]] = ii + 1;
         }
+        copy_header((art_node*)new_node, (art_node*)node);
+        *ref = (art_node*)new_node;
+        zfree(&node);
+        add_child48(new_node, ref, c, child);
     }
 endfun: 
     return ret;
@@ -577,17 +578,17 @@ static int add_child4(art_node4 *node, art_node **ref,
         if(ret) {
             zfree(&tmp_node);
             goto endfun;
-        } else {
-            new_node = (art_node16*)tmp_node;
-            memcpy(new_node->children, node->children,
-                   sizeof(void*)*node->n.num_children);
-            memcpy(new_node->keys, node->keys,
-                   sizeof(unsigned char)*node->n.num_children);
-            copy_header((art_node*)new_node, (art_node*)node);
-            *ref = (art_node*)new_node;
-            zfree(&node);
-            add_child16(new_node, ref, c, child);
-        }
+        } 
+        new_node = (art_node16*)tmp_node;
+        memcpy(new_node->children, node->children,
+               sizeof(void*)*node->n.num_children);
+        memcpy(new_node->keys, node->keys,
+               sizeof(unsigned char)*node->n.num_children);
+        copy_header((art_node*)new_node, (art_node*)node);
+        *ref = (art_node*)new_node;
+        zfree(&node);
+        add_child16(new_node, ref, c, child);
+        
     }
 endfun:
     return ret;
@@ -642,9 +643,22 @@ static int prefix_mismatch(const art_node *node, const unsigned char *key,
     return i;
 }
 
-#define MEMORY_ALLOCATION_ERROR 1
+/* The following is the intersting bit I wanted to modify 
+ * 
+ * I want to not automatically update existing values on insert 
+ * but give the option to do something else between detection of this state 
+ * and the actual update of the value. */
+
+
+
+#define ART_MEMORY_ALLOCATION_ERROR 1
 #define NOMINAL 0
-#define VALUE_ALLREADY_EXISTS_ERROR -1
+#define ART_VALUE_ALLREADY_EXISTS -1
+
+/**
+ * recursive insertion of a leaf 
+ *
+ */
 
 static int recursive_insert(art_node *node, art_node **ref,
                             const unsigned char *key, int key_len,
@@ -654,7 +668,7 @@ static int recursive_insert(art_node *node, art_node **ref,
         art_leaf *tmp_leaf = NULL;
         
         ret = make_leaf( tmp_leaf, key, key_len, value );
-        if (ret == MEMORY_ALLOCATION_ERROR){
+        if (ret == ART_MEMORY_ALLOCATION_ERROR){
             zfree(&tmp_leaf);
             goto endfun;
         }
@@ -668,8 +682,58 @@ static int recursive_insert(art_node *node, art_node **ref,
 
         // Check if we are updating an existing value 
         if(!leaf_matches(leaf, key, key_len)) {
-            *old = 1;
+            prinf( "I'm not creative enough to think of something clever\n");
+            ret = ART_VALUE_ALLREADY_EXISTS; 
+            goto endfun;
         }
+
+        // New value, we must split the leaf into node4
+        art_node4 *new_node;
+        art_node *tmp_node = NULL;
+        ret = alloc_node(NODE4, tmp_node);
+        if ( ret == ART_MEMORY_ALLOCATION_ERROR){
+            zfree(&tmp_node);
+            goto endfun;
+        }
+        new_node = (art_node4*)tmp_node;
+        
+        // Create a new leaf
+        art_leaf *leaf2 = NULL;
+        ret = make_leaf( leaf2, key, key_len, value);
+        if ( ret == ART_MEMORY_ALLOCATION_ERROR){
+            goto LeafInsertfreeAll;
+        }
+
+        //Determine logest prefix
+        int longest_prefix = longest_common_prefix(leaf, leaf2, depth);
+        new_node->n.partial_len = longest_prefix;
+        memcpy(new_node->n.partial, key+depth,
+               min(MAX_PREFIX_LEN, longest_prefix));
+        // Add the leafs to the new node4
+        art_node **tmp_ref
+        *ref = (art_node*)new_node;
+        /* This is the point at which freeing new_node becomes a bad idea
+         * in case of an error. I've noticed something.
+         * This is also the point where we can no longer backoff from
+         * the insert.   
+         */         
+        ret=add_child4(new_node, ref,
+                       leaf->key[depth+longest_prefix], SET_LEAF(leaf));
+        if ( ret == ART_MEMORY_ALLOCATION_ERROR){
+            zfree(&leaf2);
+            goto endfun;
+        } 
+        //Cleanup in case of error 
+        if(0){
+LeafInsertfreeAll:
+            zfree(&leaf2);
+LeafInsertfreeNode:
+            zfree(&new_node);
+            goto endfun;
+        }
+
+         
+         
     }
 
 endfun:
