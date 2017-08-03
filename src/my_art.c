@@ -701,33 +701,37 @@ static int recursive_insert(art_node *node, art_node **ref,
         art_leaf *leaf2 = NULL;
         ret = make_leaf( leaf2, key, key_len, value);
         if ( ret == ART_MEMORY_ALLOCATION_ERROR){
-            goto LeafInsertfreeAll;
+            goto leafInsertfreeAll;
         }
-
-        //Determine logest prefix
+        
+        //Determine longest prefix
         int longest_prefix = longest_common_prefix(leaf, leaf2, depth);
         new_node->n.partial_len = longest_prefix;
         memcpy(new_node->n.partial, key+depth,
                min(MAX_PREFIX_LEN, longest_prefix));
-        // Add the leafs to the new node4
-        art_node **tmp_ref
+        
+        // Add the leafs to the new node4        
         *ref = (art_node*)new_node;
-        /* This is the point at which freeing new_node becomes a bad idea
-         * in case of an error. I've noticed something.
-         * This is also the point where we can no longer backoff from
-         * the insert.   
-         */         
-        ret=add_child4(new_node, ref,
-                       leaf->key[depth+longest_prefix], SET_LEAF(leaf));
-        if ( ret == ART_MEMORY_ALLOCATION_ERROR){
-            zfree(&leaf2);
-            goto endfun;
-        } 
+        ret = add_child4(new_node, ref,
+                         leaf->key[depth+longest_prefix], SET_LEAF(leaf));
+        if ( ret == ART_MEMORY_ALLOCATION_ERROR)
+            goto leafInsertRecoverOldState;
+        //Adding leaf2
+        ret = add_child4(new_node, ref,
+                         leaf2->key[depth+longest_prefix], SET_LEAF(leaf2));
+        if ( ret == ART_MEMORY_ALLOCATION_ERROR)
+           goto leafInsertRecoverOldState; 
+
         //Cleanup in case of error 
         if(0){
-LeafInsertfreeAll:
+            //Restore old state
+leafInsertRecoverOldState:
+            /* I needed a lot of time to notice that freeing a node 
+             * doesn't automatically free it's child nodes.
+             * Freeing new_node shouldn't touch the original leaf memory*/
+            *ref = (art_node*)SET_LEAF(leaf); 
+leafInsertfreeAll:
             zfree(&leaf2);
-LeafInsertfreeNode:
             zfree(&new_node);
             goto endfun;
         }
