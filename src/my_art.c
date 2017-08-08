@@ -557,6 +557,7 @@ static int add_child4(art_node4 *node, art_node **ref,
     int ret = 0;
     if (node->n.num_children < 4 ) {
         int i;
+        // find child that is larger than key
         for (i=0; i < node->n.num_children; i++) {
             if (c < node->keys[i]) break;
         }
@@ -735,11 +736,108 @@ leafInsertfreeAll:
             zfree(&new_node);
             goto endfun;
         }
-
-         
-         
     }
+    // Case Node: Check if given Node has a prefix
+    if (node->partial_len) {
+        // Determine if the prefixes differ, since we need to split
+        int prefix_diff = prefix_mismatch(node, key, key_len,depth);
+        if ((uint32_t)prefix_diff >= node->partial_len) {
+            depth += node->partial_len;
+            goto RECURSE_SEARCH;
+        }
+        int keyIsToBig = 0;
+        //Create a new node
+        art_node *tmp_node = NULL;
+        ret = alloc_node(NODE4, tmp_node);
+        if (ret == ART_MEMORY_ALLOCATION_ERROR){
+            zfree(&tmp_node);
+            goto endfun;
+        }
+        art_node4 *new_node = (art_node4*)tmp_node;
+        /* 
+         * after this line recovery from fault becomes tricky 
+         * We are linking the new_node to the place our old node 
+         * occupied
+         */
+        *ref = (art_node*)new_node;
+        new_node->n.partial_len = prefix_diff;
+        memcpy(new_node->n.partial, node->partial,
+               min(MAX_PREFIX_LEN, prefix_diff));
 
+        // Adjust the prefix of the old node
+        if (node->partial_len <= MAX_PREFIX_LEN) {
+            // Adding old node to new node
+            ret = add_child4(new_node, ref, node->partial[prefix_diff], node);  
+            if (ret == ART_MEMORY_ALLOCATION_ERROR)
+                goto nodeInsertRecoverNewNode;
+            node->partial_len -= (prefix_diff+1);            
+            memmove(node->partial,node->partial+prefix_diff+1,
+                    min(MAX_PREFIX_LEN, node->partial_len));
+        } else {
+            keyIsToBig = 1;
+            node->partial_len -= (prefix_diff+1);
+            /* 
+             * We cannot get the required key information from the partial,
+             * therefore we need to retrieve it from the smallest leaf
+             * below us.
+             */
+            art_leaf *leaf = minimum(node);
+            ret = add_child4(new_node, ref, leaf->key[depth+prefix_diff], node);              
+            if ( ret == ART_MEMORY_ALLOCATION_ERROR)
+                goto nodeInsertRecoverNewNode;
+            /*
+             * I believe the min to be redundant at this point, because the
+             * partial length is larger than MAX_PREFIX_LENGTH or else we
+             * shouldn't be in this condition.
+             */
+            memcpy(node->partial, leaf->key+depth+prefix_diff+1,
+                   min(MAX_PREFIX_LEN, node->partial_len));
+        }
+
+        // Insert the new leaf
+        art_leaf *new_leaf = NULL;
+        ret = make_leaf( new_leaf, key, key_len, value);
+        if ( ret == ART_MEMORY_ALLOCATION_ERROR)  
+            goto nodeInsertRecoverAll;
+        ret = add_child4(new_node, ref, 
+                         key[depth+prefix_diff], SET_LEAF(new_leaf));
+        goto endfun;
+
+nodeInsertRecoverAll:
+        if (keyIsToBig){
+            // Recover from memcpy in node 
+        } else {
+            // Recover from memmove in node
+        }
+
+nodeInsertRecoverNewNode:
+            zfree(&new_node);
+            *ref = node;
+            goto endfun;            
+    }
+        
+RECURSE_SEARCH:;
+    // Find a child to recurse to
+    art_node **child = find_child(node, key[depth]);
+    if (child) { 
+        return recursive_insert(*child, child, key, key_len,
+                                value, depth+1 ,old);
+    } 
+
+    // No child, node goes within us
+    art_leaf *leaf = NULL;
+    ret = make_leaf(leaf, key, key_len, value);
+    if (ret == ART_MEMORY_ALLOCATION_ERROR){
+        goto freeRecurseLeaf;
+    }
+    ret = add_child(node, ref, key[depth], SET_LEAF(leaf));
+    if (ret == ART_MEMORY_ALLOCATION_ERROR)
+        goto freeRecurseLeaf;
+        
 endfun:
+    return ret;
+
+freeRecurseLeaf:
+    zfree(&leaf);
     return ret;
 }
