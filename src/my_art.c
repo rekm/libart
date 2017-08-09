@@ -644,7 +644,7 @@ static int prefix_mismatch(const art_node *node, const unsigned char *key,
     return i;
 }
 
-/* The following is the intersting bit I wanted to modify 
+/* The following is the interesting bit I wanted to modify 
  * 
  * I want to not automatically update existing values on insert 
  * but give the option to do something else between detection of this state 
@@ -728,7 +728,7 @@ static int recursive_insert(art_node *node, art_node **ref,
             //Restore old state
 leafInsertRecoverOldState:
             /* I needed a lot of time to notice that freeing a node 
-             * doesn't automatically free it's child nodes.
+             * doesn't automatically free its child nodes.
              * Freeing new_node shouldn't touch the original leaf memory*/
             *ref = (art_node*)SET_LEAF(leaf); 
 leafInsertfreeAll:
@@ -745,6 +745,13 @@ leafInsertfreeAll:
             depth += node->partial_len;
             goto RECURSE_SEARCH;
         }
+        /* 
+         * This char will later join the ranks of child nodes
+         * and might be hard to recover, in case we have to undo this
+         * operation quickly. From here on out, it will be known as 
+         * the safety char of justice. 
+         */      
+        char recovery_key = node->partial[prefix_diff];
         int keyIsToBig = 0;
         //Create a new node
         art_node *tmp_node = NULL;
@@ -808,7 +815,14 @@ nodeInsertRecoverAll:
             // Recover from memcpy in node 
         } else {
             // Recover from memmove in node
-        }
+            memmove(node->partial+prefix_diff+1,node->partial,
+                    min(MAX_PREFIX_LEN, node->partial_len));
+            node->partial[prefix_diff] = recovery_key; 
+            memcpy(node->partial, new_node->n.partial, 
+                   min(MAX_PREFIX_LEN, prefix_diff));
+        }   
+        /* 
+         * This index pushing is likely to be wrong*/
 
 nodeInsertRecoverNewNode:
             zfree(&new_node);
