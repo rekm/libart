@@ -3,7 +3,7 @@
 #include <strings.h>
 #include <stdio.h>
 #include <assert.h>
-#include "art.h"
+#include "my_art.h"
 
 /**Getting intrinsics for vector comparison */
 #ifdef __i386__
@@ -652,9 +652,9 @@ static int prefix_mismatch(const art_node *node, const unsigned char *key,
 
 
 
-#define ART_MEMORY_ALLOCATION_ERROR 1
 #define NOMINAL 0
-#define ART_VALUE_ALLREADY_EXISTS -1
+#define ART_MEMORY_ALLOCATION_ERROR 1
+#define ART_VALUE_ALLREADY_EXISTS 2
 
 /**
  * recursive insertion of a leaf 
@@ -683,7 +683,7 @@ static int recursive_insert(art_node *node, art_node **ref,
 
         // Check if we are updating an existing value 
         if(!leaf_matches(leaf, key, key_len)) {
-            prinf( "I'm not creative enough to think of something clever\n");
+            printf( "I'm not creative enough to think of something clever\n");
             ret = ART_VALUE_ALLREADY_EXISTS; 
             goto endfun;
         }
@@ -811,18 +811,17 @@ leafInsertfreeAll:
         goto endfun;
 
 nodeInsertRecoverAll:
-        if (keyIsToBig){
-            // Recover from memcpy in node 
-        } else {
+        if (!keyIsToBig){
             // Recover from memmove in node
             memmove(node->partial+prefix_diff+1,node->partial,
                     min(MAX_PREFIX_LEN, node->partial_len));
             node->partial[prefix_diff] = recovery_key; 
-            memcpy(node->partial, new_node->n.partial, 
-                   min(MAX_PREFIX_LEN, prefix_diff));
         }   
         /* 
-         * This index pushing is likely to be wrong*/
+         * This index pushing is likely to be wrong
+         */
+        memcpy(node->partial, new_node->n.partial, 
+               min(MAX_PREFIX_LEN, prefix_diff));
 
 nodeInsertRecoverNewNode:
             zfree(&new_node);
@@ -855,3 +854,107 @@ freeRecurseLeaf:
     zfree(&leaf);
     return ret;
 }
+
+/**
+ * Inserts a new value into the ART tree 
+ * @arg tree The tree
+ * @arg key The key
+ * @arg key_len
+ * @arg value Opaque value
+ * @return int 
+            0 - NOMINAL
+            1 - ART_MEMORY_ALLOCATION_ERROR
+            2 - ART_VALUE_ALLREADY_EXISTS
+            
+ */
+
+int art_insert(art_tree *tree, const unsigned char *key,
+               int key_len, void *value) {
+    int ret = NOMINAL;
+    int old_val = 0;
+    int *depth = 0;
+    ret = recursive_insert(tree->root, &tree->root, key,
+                           key_len, value, 0, &old_val);
+    switch (ret){     
+        case NOMINAL:
+            break;
+        case ART_VALUE_ALLREADY_EXISTS:
+            break;
+        case ART_MEMORY_ALLOCATION_ERROR:
+            break;
+        default:
+            break; 
+    }
+    return ret;
+}
+
+static int remove_child256(art_node256 *node, 
+                            art_node **ref, unsigned char c ) {
+    int ret = NOMINAL;
+    node->children[c] = NULL;
+    node->n.num_children--;
+    
+    /*
+     * Resize to node48 on underflow, not immedialtly to prevent
+     * thrashing if we sit on the 48/49 boundary
+     */
+    if (node->n.num_children == 37) {
+        art_node *tmp_node = NULL;
+        ret = alloc_node(NODE48, tmp_node);
+        if (ret == ART_MEMORY_ALLOCATION_ERROR){
+            zfree(&tmp_node);
+            goto endfun;
+        }
+        // Could use tmp_node, but that feels wrong  
+        art_node48 *new_node = (art_node48*)tmp_node;
+        *ref = (art_node*)new_node;
+        copy_header((art_node*)new_node, (art_node*)node);
+
+        int pos = 0;
+        for (int i=0; i<256;i++) { 
+            if (node->children[i]){
+                new_node->children[pos] = node->children[i];
+                new_node->keys[i] = pos + 1;
+                pos++;
+            }
+        }
+        zfree(&node);
+    }
+endfun:
+    return ret;
+}
+
+static int remove_child48(art_node48 *node, art_node **ref, unsigned char c) {
+    int ret = NOMINAL;
+    int pos = node->keys[c];
+    node->keys[c] = 0;
+    node->children[pos-1] = NULL;
+    node->n.num_children--;
+
+    if (node->n.num_children == 12) {
+        art_node *tmp_node = NULL;
+        ret = alloc_node(NODE16, tmp_node);
+        if (ret == ART_MEMORY_ALLOCATION_ERROR){
+            zfree(&tmp_node);
+            goto endfun;
+        }
+        art_node16 *new_node = (art_node16*)tmp_node;
+        *ref = (art_node*)new_node;
+        copy_header((art_node*)new_node, (art_node*)node);
+
+        int child = 0;
+        for( int i=0; i < 256; i++) {
+            pos = node ->keys[i];
+            if (pos) {
+                new_node->keys[child] = i;
+                new_node->children[child] = node->children[pos-1];
+                child++;
+            }
+        }
+        zfree(&node);
+    }        
+endfun:
+    return ret;
+}
+
+
