@@ -26,6 +26,8 @@ extern "C" {
 
 typedef int(*art_callback)(void *data, const unsigned char *key, uint32_t key_len, void *value);
 
+
+
 /**
  * This struct is included as part
  * of all the various node sizes
@@ -128,16 +130,32 @@ inline uint64_t art_size(art_tree *t) {
 }
 #endif
 
+
+
 /**
  * Inserts a new value into the ART tree
- * @arg t The tree
+ * @arg tree The tree
  * @arg key The key
  * @arg key_len The length of the key
  * @arg value Opaque value.
  * @return NULL if the item was newly inserted, otherwise
  * the old value pointer is returned.
  */
-void* art_insert(art_tree *t, const unsigned char *key, int key_len, void *value);
+int art_insert(art_tree *t, const unsigned char *key, int key_len, void *value);
+
+/**
+ * Struct soring all the required parameters for a recursive insert
+ * used to retry insert or overwrite.
+ */
+typedef struct {
+    art_node *node; 
+    art_node **ref;
+    const unsigned char *key;
+    int key_len;
+    void *value;
+    int depth;
+    int *old;
+} insertRecovery;
 
 /**
  * Deletes a value from the ART tree
@@ -159,6 +177,14 @@ void* art_delete(art_tree *t, const unsigned char *key, int key_len);
  */
 void* art_search(const art_tree *t, const unsigned char *key, int key_len);
 
+/**
+ * @brief Searches for a leaf that is prefix of the key
+ * 
+ * @returns: 0, if key has leaf as prefix
+ *           1, if it hasn't  
+ */
+int art_prefixl_search(const art_tree *t, const unsigned char *key, 
+                      int key_len);
 /**
  * Returns the minimum valued leaf
  * @return The minimum leaf or NULL
