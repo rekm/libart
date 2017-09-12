@@ -45,25 +45,25 @@
  * @return:  0 , in case of memory allocation error
  *           1 , if memory allocation fails  */
 
-static int alloc_node(uint8_t type,art_node *node) {
+static int alloc_node(uint8_t type,art_node **node) {
     switch (type) { 
         case NODE4:
-            node = (art_node*)calloc(1, sizeof(art_node4));
+            *node = (art_node*)calloc(1, sizeof(art_node4));
             break;
         case NODE16:
-            node = (art_node*)calloc(1, sizeof(art_node16));
+            *node = (art_node*)calloc(1, sizeof(art_node16));
             break;
         case NODE48:
-            node = (art_node*)calloc(1, sizeof(art_node48));
+            *node = (art_node*)calloc(1, sizeof(art_node48));
             break;
         case NODE256:
-            node = (art_node*)calloc(1, sizeof(art_node256));
+            *node = (art_node*)calloc(1, sizeof(art_node256));
             break;
         default:
             abort();
     }
-    if(node){
-        node->type = type;
+    if(*node){
+        (*node)->type = type;
         return 0;
     }
     else
@@ -430,13 +430,13 @@ art_leaf *art_maximum(art_tree *t) {
  * @returns 0 if creation succeeded
  *          1 if it failed
  */
-static int make_leaf(art_leaf *nleaf, const unsigned char *key,
+static int make_leaf(art_leaf **nleaf, const unsigned char *key,
                      int key_len, void *value) {
-    nleaf = (art_leaf*)calloc(1, sizeof(art_leaf)+key_len);
-    if(nleaf){
-        nleaf->value = value;
-        nleaf->key_len = key_len;
-        memcpy(nleaf->key,key,key_len);
+    *nleaf = (art_leaf*)calloc(1, sizeof(art_leaf)+key_len);
+    if(*nleaf){
+        (*nleaf)->value = value;
+        (*nleaf)->key_len = key_len;
+        memcpy((*nleaf)->key,key,key_len);
         return 0;
     }
     return 1;
@@ -494,12 +494,19 @@ static int add_child48(art_node48 *node, art_node **ref, unsigned char c,
          * In before this causes the biggest memory leak of all time */
         art_node256 *new_node;
         art_node *temp_node = NULL;
-        ret = alloc_node(NODE256,temp_node);
+        ret = alloc_node(NODE256,&temp_node);
         if(ret){
             zfree(&temp_node);
             goto endfun;
-        }            
+        }          
         new_node = (art_node256*)temp_node;
+        for (int i=0;i<256;i++) {
+            if (node->keys[i]) {
+                new_node->children[i] = node->children[node->keys[i] - 1];
+            }
+        }
+        copy_header((art_node*)new_node, (art_node*)node);
+        *ref = (art_node*)new_node;
         zfree(&node);
         add_child256(new_node, c, child);
     }
@@ -563,7 +570,7 @@ static int add_child16(art_node16 *node, art_node **ref,
     } else {
         art_node48 *new_node;
         art_node *tmp_node = NULL;
-        ret = alloc_node(NODE48,tmp_node);
+        ret = alloc_node(NODE48,&tmp_node);
         if(ret){
             zfree(&tmp_node);
             goto endfun;
@@ -606,7 +613,7 @@ static int add_child4(art_node4 *node, art_node **ref,
     } else { 
         art_node16 *new_node;
         art_node *tmp_node = NULL;
-        ret = alloc_node(NODE16, tmp_node);
+        ret = alloc_node(NODE16, &tmp_node);
         
         if(ret) {
             zfree(&tmp_node);
@@ -699,7 +706,7 @@ static int recursive_insert(art_node *node, art_node **ref,
     if (!node) {
         art_leaf *tmp_leaf = NULL;
         
-        ret = make_leaf( tmp_leaf, key, key_len, value );
+        ret = make_leaf( &tmp_leaf, key, key_len, value );
         if (ret == ART_MEMORY_ALLOCATION_ERROR){
             zfree(&tmp_leaf);
             goto endfun;
@@ -722,7 +729,7 @@ static int recursive_insert(art_node *node, art_node **ref,
         // New value, we must split the leaf into node4
         art_node4 *new_node;
         art_node *tmp_node = NULL;
-        ret = alloc_node(NODE4, tmp_node);
+        ret = alloc_node(NODE4, &tmp_node);
         if ( ret == ART_MEMORY_ALLOCATION_ERROR){
             zfree(&tmp_node);
             goto endfun;
@@ -731,7 +738,7 @@ static int recursive_insert(art_node *node, art_node **ref,
         
         // Create a new leaf
         art_leaf *leaf2 = NULL;
-        ret = make_leaf( leaf2, key, key_len, value);
+        ret = make_leaf( &leaf2, key, key_len, value);
         if ( ret == ART_MEMORY_ALLOCATION_ERROR){
             goto leafInsertfreeAll;
         }
@@ -786,7 +793,7 @@ leafInsertfreeAll:
         int keyIsToBig = 0;
         //Create a new node
         art_node *tmp_node = NULL;
-        ret = alloc_node(NODE4, tmp_node);
+        ret = alloc_node(NODE4, &tmp_node);
         if (ret == ART_MEMORY_ALLOCATION_ERROR){
             zfree(&tmp_node);
             goto endfun;
@@ -834,7 +841,7 @@ leafInsertfreeAll:
 
         // Insert the new leaf
         art_leaf *new_leaf = NULL;
-        ret = make_leaf( new_leaf, key, key_len, value);
+        ret = make_leaf( &new_leaf, key, key_len, value);
         if ( ret == ART_MEMORY_ALLOCATION_ERROR)  
             goto nodeInsertRecoverAll;
         ret = add_child4(new_node, ref, 
@@ -870,7 +877,7 @@ RECURSE_SEARCH:;
 
     // No child, node goes within us
     art_leaf *leaf = NULL;
-    ret = make_leaf(leaf, key, key_len, value);
+    ret = make_leaf(&leaf, key, key_len, value);
     if (ret == ART_MEMORY_ALLOCATION_ERROR){
         goto freeRecurseLeaf;
     }
@@ -908,6 +915,7 @@ int art_insert(art_tree *tree, const unsigned char *key,
                            key_len, value, 0, &old_val);
     switch (ret){     
         case NOMINAL:
+            tree->size++;
             break;
         case ART_VALUE_ALLREADY_EXISTS:
             perror("Key already exists!");
@@ -918,6 +926,7 @@ int art_insert(art_tree *tree, const unsigned char *key,
         default:
             break; 
     }
+
     return ret;
 }
 
@@ -933,7 +942,7 @@ static int remove_child256(art_node256 *node,
      */
     if (node->n.num_children == 37) {
         art_node *tmp_node = NULL;
-        ret = alloc_node(NODE48, tmp_node);
+        ret = alloc_node(NODE48, &tmp_node);
         if (ret == ART_MEMORY_ALLOCATION_ERROR){
             zfree(&tmp_node);
             goto endfun;
@@ -966,7 +975,7 @@ static int remove_child48(art_node48 *node, art_node **ref, unsigned char c) {
 
     if (node->n.num_children == 12) {
         art_node *tmp_node = NULL;
-        ret = alloc_node(NODE16, tmp_node);
+        ret = alloc_node(NODE16, &tmp_node);
         if (ret == ART_MEMORY_ALLOCATION_ERROR){
             zfree(&tmp_node);
             goto endfun;
@@ -999,7 +1008,7 @@ static int remove_child16(art_node16 *n, art_node **ref, art_node **l) {
 
     if (n->n.num_children == 3) {
         art_node *tmp_node = NULL;
-        ret = alloc_node(NODE4,tmp_node);
+        ret = alloc_node(NODE4, &tmp_node);
         if (ret == ART_MEMORY_ALLOCATION_ERROR){
             zfree(&tmp_node);
             goto endfun;

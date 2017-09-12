@@ -34,7 +34,7 @@ START_TEST(test_art_insert)
     while (fgets(buf, sizeof buf, f)) {
         len = strlen(buf);
         buf[len-1] = '\0';
-        fail_unless(NULL == art_insert(&t, (unsigned char*)buf, len, (void*)line));
+        fail_unless(0 == art_insert(&t, (unsigned char*)buf, len, (void*)line));
         fail_unless(art_size(&t) == line);
         line++;
     }
@@ -88,8 +88,8 @@ START_TEST(test_art_insert_verylong)
       44,208,250,180,14,1,0,0,8, '\0'};
 
 
-    fail_unless(NULL == art_insert(&t, key1, 299, (void*)key1));
-    fail_unless(NULL == art_insert(&t, key2, 302, (void*)key2));
+    fail_unless(0 == art_insert(&t, key1, 299, (void*)key1));
+    fail_unless(0 == art_insert(&t, key2, 302, (void*)key2));
     art_insert(&t, key2, 302, (void*)key2);
     fail_unless(art_size(&t) == 2);
 
@@ -112,7 +112,7 @@ START_TEST(test_art_insert_search)
     while (fgets(buf, sizeof buf, f)) {
         len = strlen(buf);
         buf[len-1] = '\0';
-        fail_unless(NULL ==
+        fail_unless(0 ==
             art_insert(&t, (unsigned char*)buf, len, (void*)line));
         line++;
     }
@@ -159,7 +159,7 @@ START_TEST(test_art_insert_delete)
     while (fgets(buf, sizeof buf, f)) {
         len = strlen(buf);
         buf[len-1] = '\0';
-        fail_unless(NULL ==
+        fail_unless(0 ==
             art_insert(&t, (unsigned char*)buf, len, (void*)line));
         line++;
     }
@@ -224,7 +224,7 @@ START_TEST(test_art_insert_iter)
     while (fgets(buf, sizeof buf, f)) {
         len = strlen(buf);
         buf[len-1] = '\0';
-        fail_unless(NULL ==
+        fail_unless(0 ==
             art_insert(&t, (unsigned char*)buf, len, (void*)line));
 
         xor_mask ^= (line * (buf[0] + len));
@@ -266,22 +266,22 @@ START_TEST(test_art_iter_prefix)
     fail_unless(res == 0);
 
     const char *s = "api.foo.bar";
-    fail_unless(NULL == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
+    fail_unless(0 == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
 
     s = "api.foo.baz";
-    fail_unless(NULL == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
+    fail_unless(0 == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
 
     s = "api.foe.fum";
-    fail_unless(NULL == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
+    fail_unless(0 == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
 
     s = "abc.123.456";
-    fail_unless(NULL == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
+    fail_unless(0 == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
 
     s = "api.foo";
-    fail_unless(NULL == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
+    fail_unless(0 == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
 
     s = "api";
-    fail_unless(NULL == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
+    fail_unless(0 == art_insert(&t, (unsigned char*)s, strlen(s)+1, NULL));
 
     // Iterate over api
     const char *expected[] = {"api", "api.foe.fum", "api.foo", "api.foo.bar", "api.foo.baz"};
@@ -338,15 +338,15 @@ START_TEST(test_art_long_prefix)
 
     s = "this:key:has:a:long:prefix:3";
     v = 3;
-    fail_unless(NULL == art_insert(&t, (unsigned char*)s, strlen(s)+1, (void*)v));
+    fail_unless(0 == art_insert(&t, (unsigned char*)s, strlen(s)+1, (void*)v));
 
     s = "this:key:has:a:long:common:prefix:2";
     v = 2;
-    fail_unless(NULL == art_insert(&t, (unsigned char*)s, strlen(s)+1, (void*)v));
+    fail_unless(0 == art_insert(&t, (unsigned char*)s, strlen(s)+1, (void*)v));
 
     s = "this:key:has:a:long:common:prefix:1";
     v = 1;
-    fail_unless(NULL == art_insert(&t, (unsigned char*)s, strlen(s)+1, (void*)v));
+    fail_unless(0 == art_insert(&t, (unsigned char*)s, strlen(s)+1, (void*)v));
 
     // Search for the keys
     s = "this:key:has:a:long:common:prefix:1";
@@ -387,7 +387,7 @@ START_TEST(test_art_insert_search_uuid)
     while (fgets(buf, sizeof buf, f)) {
         len = strlen(buf);
         buf[len-1] = '\0';
-        fail_unless(NULL ==
+        fail_unless(0 ==
             art_insert(&t, (unsigned char*)buf, len, (void*)line));
         line++;
     }
@@ -427,13 +427,13 @@ START_TEST(test_art_max_prefix_len_scan_prefix)
     fail_unless(res == 0);
 
     char* key1 = "foobarbaz1-test1-foo";
-    fail_unless(NULL == art_insert(&t, (unsigned char*)key1, strlen(key1)+1, NULL));
+    fail_unless(0 == art_insert(&t, (unsigned char*)key1, strlen(key1)+1, NULL));
 
     char *key2 = "foobarbaz1-test1-bar";
-    fail_unless(NULL == art_insert(&t, (unsigned char*)key2, strlen(key2)+1, NULL));
+    fail_unless(0 == art_insert(&t, (unsigned char*)key2, strlen(key2)+1, NULL));
 
     char *key3 = "foobarbaz1-test2-foo";
-    fail_unless(NULL == art_insert(&t, (unsigned char*)key3, strlen(key3)+1, NULL));
+    fail_unless(0 == art_insert(&t, (unsigned char*)key3, strlen(key3)+1, NULL));
 
     fail_unless(art_size(&t) == 3);
 
