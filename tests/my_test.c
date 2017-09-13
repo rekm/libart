@@ -101,9 +101,61 @@ int test_art_insert_verylong(){
     return ret;
 }
 
+int test_art_insert_search(){
+    int ret = 0;
+    art_tree t;
+    int res = art_tree_init(&t);
+    fail_unless(res == 0);
+
+    int len;
+    char buf[512];
+    FILE *f = fopen("words.txt", "r");
+
+    uintptr_t line = 1;
+    while (fgets(buf, sizeof buf, f)) {
+        len = strlen(buf);
+        buf[len-1] = '\0';
+        fail_unless(0 ==
+            art_insert(&t, (unsigned char*)buf, len, (void*)line));
+        line++;
+    }
+
+    // Seek back to the start
+    fseek(f, 0, SEEK_SET);
+
+    // Search for each line
+    line = 1;
+    while (fgets(buf, sizeof buf, f)) {
+        len = strlen(buf);
+        buf[len-1] = '\0';
+
+        uintptr_t val = (uintptr_t)art_search(&t, (unsigned char*)buf, len);
+	    ret = fail_unless(line == val);
+        fprintf(stderr,  "Line: %lu Val: %" PRIuPTR " Str: %s\n",
+                   line, val, buf);
+        //    return 1;
+        line++;
+    }
+
+    // Check the minimum
+    art_leaf *l = art_minimum(&t);
+    fail_unless(l && strcmp((char*)l->key, "A") == 0);
+
+    // Check the maximum
+    l = art_maximum(&t);
+    fail_unless(l && strcmp((char*)l->key, "zythum") == 0);
+
+    res = art_tree_destroy(&t);
+    fail_unless(res == 0);
+    return ret;
+}
+
+
+
 int main (void){
     //pure_init();
     //insert_init_test();
-    test_art_insert_verylong();
+    //test_art_insert_verylong();
+    test_art_insert_search();
     return 0;
 } 

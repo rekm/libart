@@ -772,8 +772,8 @@ leafInsertRecoverOldState:
 leafInsertfreeAll:
             zfree(&leaf2);
             zfree(&new_node);
-            goto endfun;
         }
+        goto endfun;
     }
     // Case Node: Check if given Node has a prefix
     if (node->partial_len) {
