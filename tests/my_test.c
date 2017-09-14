@@ -19,7 +19,7 @@ int pure_init(){
 
     res = art_tree_destroy(&t);
     ret = fail_unless(res == 0);
-    return ret; 
+    return ret;
 }
 
 int insert_init_test(){
@@ -131,9 +131,11 @@ int test_art_insert_search(){
 
         uintptr_t val = (uintptr_t)art_search(&t, (unsigned char*)buf, len);
 	    ret = fail_unless(line == val);
-        fprintf(stderr,  "Line: %lu Val: %" PRIuPTR " Str: %s\n",
+        if(!ret){
+            printf("Line: %lu Val: %" PRIuPTR " Str: %s\n",
                    line, val, buf);
-        //    return 1;
+            goto endfun;
+        }
         line++;
     }
 
@@ -144,13 +146,12 @@ int test_art_insert_search(){
     // Check the maximum
     l = art_maximum(&t);
     fail_unless(l && strcmp((char*)l->key, "zythum") == 0);
-
+endfun:
+    fclose(f);
     res = art_tree_destroy(&t);
     fail_unless(res == 0);
     return ret;
 }
-
-
 
 int main (void){
     //pure_init();
@@ -158,4 +159,4 @@ int main (void){
     //test_art_insert_verylong();
     test_art_insert_search();
     return 0;
-} 
+}
