@@ -148,7 +148,7 @@ int art_insert(art_tree *t, const unsigned char *key, int key_len, void *value);
  * used to retry insert or overwrite.
  */
 typedef struct {
-    art_node *node; 
+    art_node *node;
     art_node **ref;
     const unsigned char *key;
     int key_len;
@@ -178,12 +178,16 @@ void* art_delete(art_tree *t, const unsigned char *key, int key_len);
 void* art_search(const art_tree *t, const unsigned char *key, int key_len);
 
 /**
- * @brief Searches for a leaf that is prefix of the key
- * 
- * @returns: 0, if key has leaf as prefix
- *           1, if it hasn't  
+ * @brief Checks if there exists a leaf that is a prefix to the key
+ *
+ * @param t: pointer to art_tree
+ * @param key: key to be checked
+ * @param key_len: the function needs to know how long the key is
+ *
+ * @returns: 1, if key has a leaf as prefix
+ *           0, if it hasn't
  */
-int art_prefixl_search(const art_tree *t, const unsigned char *key, 
+int art_prefixl_search(const art_tree *t, const unsigned char *key,
                       int key_len);
 /**
  * Returns the minimum valued leaf

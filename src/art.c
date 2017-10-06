@@ -334,12 +334,14 @@ int art_prefixl_search(const art_tree *t, const unsigned char *key,
                 if (leaf->key[i+depth] != key[depth+i])
                     break;
             }
-            return i != max_cmp;
+            //printf("leafprefix:\n%s\nfile:\n%s\n",leaf->key,key);
+            return    (i == max_cmp)
+                   || ((i+1 == max_cmp) && (key[i+depth] == '/'));
         }
         if (node->partial_len) {
         prefix_len = check_prefix(node, key, key_len, depth);
         if (prefix_len != min(MAX_PREFIX_LEN, node->partial_len))
-            return 1;
+            return 0;
         depth = depth + node->partial_len;
         }
 
@@ -348,7 +350,7 @@ int art_prefixl_search(const art_tree *t, const unsigned char *key,
         node = (children) ? *children : NULL;
         depth++;
     }
-    return 1;
+    return 0;
 }
 // Get minimum leaf under node
 static art_leaf* minimum(const art_node *node) {
